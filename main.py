@@ -1,24 +1,19 @@
-from pyrogram import Client, filters
-import random
-import math
-import asyncio
+from telethon import TelegramClient, events
+from telethon.sessions import StringSession
+import random, math, asyncio
 
 api_id = 20008394
 api_hash = "44c0df39906e03ff01682b80ddcda4a3"
 session_string = "1BZWaqwUAUKk5fB8deRsrC7j1hPNov39lGS81Js-e_BD2XiCFXQDDIOK0tjnR0xhetnZeJL7mOd9LVVf-f_JTeN_q2Ur6mVEnpRBuAiWDMm3GwSTYw8u4uAIfw81uF9BeulWF5GAuB544_Cpmh5iRtexFR3pbll2ufKlIT1KMLLXoNH78wnBjwLyn5IUgNPcGOq_0in4lRTNxbH4--fbIEcm5t5woSj6RR3sXNAXIK_gVxlF6CU4VFRKKS6b_U7ceLiLIjvv0EU3bLF_VGxhBKvdZj00kAjQWrJOCzGz3Vdq369sbgc1QTT3f04t4klcCPSwXc1JdTW6AxQVzshV74P-tlAle_lQ="
-app = Client("userbot", api_id=api_id, api_hash=api_hash, session_string=session_string)
+
+
+client = TelegramClient(StringSession(session_string), api_id, api_hash)
 
 ROWS, COLS = 6, 7
 PLAYER, BOT = "🔴", "🟡"
-
-ACTIVE_CHATS = set()
 CACHE = {}
 
-OPENING = {
-    0: 3,
-    1: 3,
-    2: 3
-}
+TARGET_BOT_ID = None  # put bot id if needed (e.g. 5416991774)
 
 def norm(x):
     return "".join(c for c in x if c.isalnum()).lower()
@@ -56,18 +51,26 @@ def win(b,p):
             if all(b[r-i][c+i]==p for i in range(4)): return True
     return False
 
+def fast(b):
+    v=valid(b)
+    for c in v:
+        if win(drop(b,c,PLAYER),PLAYER): return c
+    for c in v:
+        if win(drop(b,c,BOT),BOT): return c
+    return None
+
 def score(w,p):
     s=0;o=BOT if p==PLAYER else PLAYER
     if w.count(p)==4: s+=100
-    elif w.count(p)==3 and w.count("⚪")==1: s+=20
-    elif w.count(p)==2 and w.count("⚪")==2: s+=8
-    if w.count(o)==3 and w.count("⚪")==1: s-=15
+    elif w.count(p)==3 and w.count("⚪")==1: s+=15
+    elif w.count(p)==2 and w.count("⚪")==2: s+=6
+    if w.count(o)==3 and w.count("⚪")==1: s-=12
     return s
 
 def evaluate(b,p):
     s=0
     center=[b[r][COLS//2] for r in range(ROWS)]
-    s+=center.count(p)*12
+    s+=center.count(p)*10
     for r in range(ROWS):
         for c in range(COLS-3):
             s+=score(b[r][c:c+4],p)
@@ -121,61 +124,52 @@ def minimax(b,d,a,beta,maxi):
     CACHE[k]=(best,val)
     return best,val
 
-def fast(b):
-    v=valid(b)
-    for c in v:
-        if win(drop(b,c,PLAYER),PLAYER): return c
-    for c in v:
-        if win(drop(b,c,BOT),BOT): return c
-    return None
+@client.on(events.NewMessage)
+async def auto(event):
+    if TARGET_BOT_ID and event.sender_id != TARGET_BOT_ID:
+        return
 
-@app.on_message(filters.command("auto_on"))
-async def on(_,m):
-    ACTIVE_CHATS.add(m.chat.id)
-    await m.reply("AUTO ON")
+    t = event.raw_text or ""
 
-@app.on_message(filters.command("auto_off"))
-async def off(_,m):
-    ACTIVE_CHATS.discard(m.chat.id)
-    await m.reply("AUTO OFF")
+    if "1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣" not in t:
+        return
+    if "WON" in t:
+        return
 
-@app.on_message(filters.text)
-async def auto(c,m):
-    if m.chat.id not in ACTIVE_CHATS: return
-    t=m.text or ""
-    if "1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣" not in t: return
-    if "WON" in t: return
+    turn = [l for l in t.split("\n") if "Turn:" in l]
+    if not turn:
+        return
 
-    me=await c.get_me()
-    turn=[l for l in t.split("\n") if "Turn:" in l]
-    if not turn: return
+    me = await client.get_me()
+    me_name = norm((me.first_name or "") + (me.last_name or "") + (me.username or ""))
 
-    me_name=norm((me.first_name or "")+(me.last_name or "")+(me.username or ""))
-    if me_name not in norm(turn[0]): return
+    if me_name not in norm(turn[0]):
+        return
 
-    b=parse_board(t)
-    if len(b)<6: return
+    b = parse_board(t)
+    if len(b) < 6:
+        return
 
-    moves_played = sum(r.count(PLAYER)+r.count(BOT) for r in b)
-    if moves_played in OPENING:
-        mv = OPENING[moves_played]
-    else:
-        mv=fast(b)
-        if mv is None:
-            empties=sum(r.count("⚪") for r in b)
-            depth=8 if empties>25 else 7
-            mv,_=minimax(b,depth,-math.inf,math.inf,True)
+    mv = fast(b)
 
-    if mv is None: return
+    if mv is None:
+        empties = sum(r.count("⚪") for r in b)
+        depth = 7 if empties > 20 else 6
+        mv,_ = minimax(b, depth, -math.inf, math.inf, True)
 
-    await asyncio.sleep(random.uniform(0.4,1.0))
+    if mv is None:
+        return
+
+    await asyncio.sleep(random.uniform(0.4, 1.0))
 
     try:
-        await m.click(mv)
+        await event.click(0, mv)
     except:
         try:
-            await m.click(x=mv)
-        except:
-            pass
+            await event.click(mv)
+        except Exception as e:
+            print("click fail:", e)
 
-app.run()
+client.start()
+client.run_until_disconnected()
+
