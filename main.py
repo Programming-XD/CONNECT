@@ -9,175 +9,174 @@ session_string = "BQFHY-cAJu3TTTq3jqctLdhAI__Q0lDEm7q-XTiPRB1ZCwuzpASy_kgx6RihNi
 
 app = Client("userbot", api_id=api_id, api_hash=api_hash, session_string=session_string)
 
-ROWS = 6
-COLS = 7
-PLAYER = "🔴"
-BOT = "🟡"
+ROWS, COLS = 6, 7
+PLAYER, BOT = "🔴", "🟡"
 
 ACTIVE_CHATS = set()
+CACHE = {}
 
-def parse_board(text):
-    lines = text.split("\n")
-    board = []
-    for line in lines:
-        if any(x in line for x in ["🔴","🟡","⚪"]):
-            board.append(list(line.strip()))
-    return board
+OPENING = {
+    0: 3,
+    1: 3,
+    2: 3
+}
 
-def valid_moves(board):
-    return [c for c in range(COLS) if board[0][c] == "⚪"]
+def norm(x):
+    return "".join(c for c in x if c.isalnum()).lower()
 
-def drop(board, col, piece):
-    temp = [row[:] for row in board]
-    for r in range(ROWS-1, -1, -1):
-        if temp[r][col] == "⚪":
-            temp[r][col] = piece
-            return temp
+def parse_board(t):
+    b=[]
+    for l in t.split("\n"):
+        if any(x in l for x in ["🔴","🟡","⚪"]):
+            b.append(list(l.strip()))
+    return b[-6:]
+
+def valid(b):
+    return [c for c in range(COLS) if b[0][c]=="⚪"]
+
+def drop(b,c,p):
+    nb=[r[:] for r in b]
+    for r in range(ROWS-1,-1,-1):
+        if nb[r][c]=="⚪":
+            nb[r][c]=p
+            return nb
     return None
 
-def win(board, piece):
+def win(b,p):
     for r in range(ROWS):
         for c in range(COLS-3):
-            if all(board[r][c+i] == piece for i in range(4)):
-                return True
+            if all(b[r][c+i]==p for i in range(4)): return True
     for r in range(ROWS-3):
         for c in range(COLS):
-            if all(board[r+i][c] == piece for i in range(4)):
-                return True
+            if all(b[r+i][c]==p for i in range(4)): return True
     for r in range(ROWS-3):
         for c in range(COLS-3):
-            if all(board[r+i][c+i] == piece for i in range(4)):
-                return True
-    for r in range(3, ROWS):
+            if all(b[r+i][c+i]==p for i in range(4)): return True
+    for r in range(3,ROWS):
         for c in range(COLS-3):
-            if all(board[r-i][c+i] == piece for i in range(4)):
-                return True
+            if all(b[r-i][c+i]==p for i in range(4)): return True
     return False
 
-def score_window(window, piece):
-    score = 0
-    opp = BOT if piece == PLAYER else PLAYER
-    if window.count(piece) == 4:
-        score += 100
-    elif window.count(piece) == 3 and window.count("⚪") == 1:
-        score += 10
-    elif window.count(piece) == 2 and window.count("⚪") == 2:
-        score += 4
-    if window.count(opp) == 3 and window.count("⚪") == 1:
-        score -= 8
-    return score
+def score(w,p):
+    s=0;o=BOT if p==PLAYER else PLAYER
+    if w.count(p)==4: s+=100
+    elif w.count(p)==3 and w.count("⚪")==1: s+=20
+    elif w.count(p)==2 and w.count("⚪")==2: s+=8
+    if w.count(o)==3 and w.count("⚪")==1: s-=15
+    return s
 
-def evaluate(board, piece):
-    score = 0
-    center = [board[r][COLS//2] for r in range(ROWS)]
-    score += center.count(piece) * 6
-
+def evaluate(b,p):
+    s=0
+    center=[b[r][COLS//2] for r in range(ROWS)]
+    s+=center.count(p)*12
     for r in range(ROWS):
-        row = board[r]
         for c in range(COLS-3):
-            score += score_window(row[c:c+4], piece)
-
+            s+=score(b[r][c:c+4],p)
     for c in range(COLS):
-        col = [board[r][c] for r in range(ROWS)]
+        col=[b[r][c] for r in range(ROWS)]
         for r in range(ROWS-3):
-            score += score_window(col[r:r+4], piece)
-
+            s+=score(col[r:r+4],p)
     for r in range(ROWS-3):
         for c in range(COLS-3):
-            score += score_window([board[r+i][c+i] for i in range(4)], piece)
-
-    for r in range(3, ROWS):
+            s+=score([b[r+i][c+i] for i in range(4)],p)
+    for r in range(3,ROWS):
         for c in range(COLS-3):
-            score += score_window([board[r-i][c+i] for i in range(4)], piece)
+            s+=score([b[r-i][c+i] for i in range(4)],p)
+    return s
 
-    return score
+def key(b): return tuple(tuple(r) for r in b)
 
-def order_moves(board, moves):
-    return sorted(moves, key=lambda c: abs(3-c))
+def order(m): return sorted(m, key=lambda c: abs(3-c))
 
-def minimax(board, depth, alpha, beta, maximizing):
-    valid = valid_moves(board)
-    terminal = win(board, PLAYER) or win(board, BOT) or len(valid) == 0
+def minimax(b,d,a,beta,maxi):
+    k=(key(b),d,maxi)
+    if k in CACHE: return CACHE[k]
 
-    if depth == 0 or terminal:
-        if win(board, PLAYER):
-            return None, 1000000
-        elif win(board, BOT):
-            return None, -1000000
-        return None, evaluate(board, PLAYER)
+    v=valid(b)
+    term=win(b,PLAYER) or win(b,BOT) or not v
 
-    valid = order_moves(board, valid)
+    if d==0 or term:
+        if win(b,PLAYER): return None, 1e9
+        if win(b,BOT): return None, -1e9
+        return None, evaluate(b,PLAYER)
 
-    if maximizing:
-        value = -math.inf
-        best = valid[0]
-        for col in valid:
-            new_board = drop(board, col, PLAYER)
-            score = minimax(new_board, depth-1, alpha, beta, False)[1]
-            if score > value:
-                value = score
-                best = col
-            alpha = max(alpha, value)
-            if alpha >= beta:
-                break
-        return best, value
+    v=order(v)
+
+    if maxi:
+        val=-math.inf; best=v[0]
+        for c in v:
+            nb=drop(b,c,PLAYER)
+            sc=minimax(nb,d-1,a,beta,False)[1]
+            if sc>val: val,best=sc,c
+            a=max(a,val)
+            if a>=beta: break
     else:
-        value = math.inf
-        best = valid[0]
-        for col in valid:
-            new_board = drop(board, col, BOT)
-            score = minimax(new_board, depth-1, alpha, beta, True)[1]
-            if score < value:
-                value = score
-                best = col
-            beta = min(beta, value)
-            if alpha >= beta:
-                break
-        return best, value
+        val=math.inf; best=v[0]
+        for c in v:
+            nb=drop(b,c,BOT)
+            sc=minimax(nb,d-1,a,beta,True)[1]
+            if sc<val: val,best=sc,c
+            beta=min(beta,val)
+            if a>=beta: break
+
+    CACHE[k]=(best,val)
+    return best,val
+
+def fast(b):
+    v=valid(b)
+    for c in v:
+        if win(drop(b,c,PLAYER),PLAYER): return c
+    for c in v:
+        if win(drop(b,c,BOT),BOT): return c
+    return None
 
 @app.on_message(filters.command("auto_on"))
-async def enable(_, m):
+async def on(_,m):
     ACTIVE_CHATS.add(m.chat.id)
     await m.reply("AUTO ON")
 
 @app.on_message(filters.command("auto_off"))
-async def disable(_, m):
+async def off(_,m):
     ACTIVE_CHATS.discard(m.chat.id)
     await m.reply("AUTO OFF")
 
 @app.on_message(filters.text)
-async def auto(client, message):
-    if message.chat.id not in ACTIVE_CHATS:
-        return
+async def auto(c,m):
+    if m.chat.id not in ACTIVE_CHATS: return
+    t=m.text or ""
+    if "1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣" not in t: return
+    if "WON" in t: return
 
-    text = message.text or ""
+    me=await c.get_me()
+    turn=[l for l in t.split("\n") if "Turn:" in l]
+    if not turn: return
 
-    if "1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣" not in text:
-        return
+    me_name=norm((me.first_name or "")+(me.last_name or "")+(me.username or ""))
+    if me_name not in norm(turn[0]): return
 
-    if "WON" in text:
-        return
+    b=parse_board(t)
+    if len(b)<6: return
 
-    me = await client.get_me()
+    moves_played = sum(r.count(PLAYER)+r.count(BOT) for r in b)
+    if moves_played in OPENING:
+        mv = OPENING[moves_played]
+    else:
+        mv=fast(b)
+        if mv is None:
+            empties=sum(r.count("⚪") for r in b)
+            depth=8 if empties>25 else 7
+            mv,_=minimax(b,depth,-math.inf,math.inf,True)
 
-    if me.first_name not in text and (me.username and me.username not in text):
-        return
+    if mv is None: return
 
-    board = parse_board(text)
-
-    if len(board) != 6:
-        return
-
-    col, _ = minimax(board, 6, -math.inf, math.inf, True)
-
-    if col is None:
-        return
-
-    await asyncio.sleep(random.uniform(1,2.5))
+    await asyncio.sleep(random.uniform(0.4,1.0))
 
     try:
-        await message.click(col)
+        await m.click(mv)
     except:
-        pass
+        try:
+            await m.click(x=mv)
+        except:
+            pass
 
 app.run()
