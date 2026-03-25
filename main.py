@@ -13,7 +13,7 @@ ROWS, COLS = 6, 7
 PLAYER, BOT = "🔴", "🟡"
 CACHE = {}
 
-TARGET_BOT_ID = None  # put bot id if needed (e.g. 5416991774)
+TARGET_BOT_ID = 5416991774
 
 def norm(x):
     return "".join(c for c in x if c.isalnum()).lower()
